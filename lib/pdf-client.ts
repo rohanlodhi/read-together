@@ -15,9 +15,9 @@ async function loadPdfjs() {
   const { pdfjs } = await import("react-pdf");
   if (typeof window !== "undefined") {
     // Always overwrite — react-pdf pre-sets workerSrc to a bare specifier
-    // that the browser can't resolve. Served from /public, kept in sync
-    // with installed pdfjs via the `copy-pdf-worker` build script.
-    pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+    // that the browser can't resolve. Version-pinned to `pdfjs.version`
+    // so it always matches react-pdf's nested pdfjs-dist.
+    pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
   }
   return pdfjs;
 }
