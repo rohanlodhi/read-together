@@ -11,7 +11,8 @@
       "Bash(curl -sS \"https://api.iconify.design/pixelarticons.json?icons=heart,star,flare,flower,smile,sad,moon,sun,cloud,fire,coffee,sparkles,mood-happy\")",
       "Bash(curl -sS \"https://api.iconify.design/pixelarticons.json?icons=edit,image,trash,human,more-horizontal,drop-half,warning-box,alert,arrow-left,arrow-right,chevron-left,chevron-right,book,book-open,bookmarks,bookmark,notes,mail,mail-arrow-right,mail-unread,downasaur,gift,zap,upload,download,plus,close,check\")",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('FOUND:', sorted\\(d['icons'].keys\\(\\)\\)\\); print\\('NOT FOUND:', d.get\\('not_found', []\\)\\)\")",
-      "Bash(curl -sS \"https://api.iconify.design/pixelarticons.json?icons=star,star-half,mood-sad,sad-cry,frown,music,fire,sparkles,heart-broken,coffee,gift,moon,sun\")"
+      "Bash(curl -sS \"https://api.iconify.design/pixelarticons.json?icons=star,star-half,mood-sad,sad-cry,frown,music,fire,sparkles,heart-broken,coffee,gift,moon,sun\")",
+      "Bash(curl -sS \"https://api.iconify.design/pixelarticons.json?icons=expand,collapse,fullscreen,scale,maximize,minimize,arrows-vertical,arrow-bar-up,arrow-up-box\")"
     ]
   }
 }

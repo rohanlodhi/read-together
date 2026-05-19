@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Pixelify_Sans, M_PLUS_Rounded_1c, Caveat } from "next/font/google";
 import { Toaster } from "react-hot-toast";
 import { themeInitScript } from "@/components/theme-toggle";
@@ -31,6 +31,15 @@ const caveat = Caveat({
 export const metadata: Metadata = {
   title: "read‑together",
   description: "A tiny shared library for two.",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  // Resize layout when the soft keyboard appears so `dvh` and fixed-
+  // positioned elements stay above the keyboard. (Chrome 108+; safe to
+  // include — older browsers ignore.)
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({

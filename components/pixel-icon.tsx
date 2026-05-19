@@ -87,6 +87,8 @@ export const ICONS = {
   user: "human",
   more: "more-horizontal",
   palette: "drop-half",
+  expand: "expand",
+  collapse: "collapse",
 } as const;
 
 export type IconName = keyof typeof ICONS;

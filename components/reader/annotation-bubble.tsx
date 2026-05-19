@@ -29,6 +29,7 @@ export function AnnotationBubble({
     isMine && !annotation.note_content,
   );
   const [isMobile, setIsMobile] = useState(false);
+  const [kbInset, setKbInset] = useState(0);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
 
   if (syncedNote !== annotation.note_content) {
@@ -43,8 +44,31 @@ export function AnnotationBubble({
     return () => window.removeEventListener("resize", check);
   }, []);
 
+  // Track on-screen-keyboard so the bottom sheet stays above it.
   useEffect(() => {
-    if (editing && taRef.current) taRef.current.focus();
+    const vv = typeof window !== "undefined" ? window.visualViewport : null;
+    if (!vv) return;
+    const update = () => {
+      const inset = window.innerHeight - vv.height - vv.offsetTop;
+      setKbInset(Math.max(0, inset));
+    };
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (editing && taRef.current) {
+      taRef.current.focus();
+      // Bring the sheet (and its textarea) into the visible viewport.
+      requestAnimationFrame(() => {
+        taRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+      });
+    }
   }, [editing]);
 
   // Tooltip positioning (desktop only).
@@ -161,7 +185,8 @@ export function AnnotationBubble({
   );
 
   if (isMobile) {
-    // Bottom sheet — fixed to viewport so it can't go off-screen.
+    // Bottom sheet — fixed to viewport. Offset by visualViewport keyboard
+    // inset so it stays above the on-screen keyboard.
     return (
       <>
         <motion.div
@@ -173,13 +198,17 @@ export function AnnotationBubble({
           onClick={onClose}
         />
         <motion.div
-          initial={{ y: "100%" }}
-          animate={{ y: 0 }}
-          exit={{ y: "100%" }}
-          transition={{ type: "spring", stiffness: 320, damping: 32 }}
+          initial={{ y: 24, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          exit={{ y: 24, opacity: 0 }}
+          transition={{ type: "spring", stiffness: 320, damping: 28 }}
           className="fixed left-2 right-2 z-50"
           style={{
-            bottom: "calc(0.5rem + env(safe-area-inset-bottom, 0))",
+            bottom: kbInset
+              ? `calc(${kbInset}px + 0.5rem)`
+              : "calc(0.5rem + env(safe-area-inset-bottom, 0))",
+            maxHeight: `calc(100dvh - ${kbInset + 24}px)`,
+            overflowY: "auto",
           }}
           onClick={(e) => e.stopPropagation()}
         >

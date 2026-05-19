@@ -379,9 +379,9 @@ export function ReaderView({
   }, [total, goNext, goPrev, showChrome]);
 
   // ----------------------------------------------------------- page sizing
-  const { pageWidth, pageHeight, ready } = useMemo(() => {
+  const { pageWidth, pageHeight, ready, fillScale } = useMemo(() => {
     if (size.w === 0 || size.h === 0) {
-      return { pageWidth: 0, pageHeight: 0, ready: false };
+      return { pageWidth: 0, pageHeight: 0, ready: false, fillScale: 1 };
     }
     const isMobile = size.w < 640;
     const pad = isMobile ? 6 : 28;
@@ -389,7 +389,18 @@ export function ReaderView({
     const maxH = size.h - pad * 2;
     const w = Math.floor(Math.min(maxW, maxH * aspect));
     const h = Math.floor(w / aspect);
-    return { pageWidth: w, pageHeight: h, ready: true };
+    // Scale that makes the page cover the full container — bigger axis fills,
+    // the other overflows and becomes pannable via the zoom infrastructure.
+    const fill =
+      h > 0 && w > 0
+        ? Math.max(size.w / w, size.h / h)
+        : 1;
+    return {
+      pageWidth: w,
+      pageHeight: h,
+      ready: true,
+      fillScale: Math.max(1, Math.min(MAX_SCALE, fill)),
+    };
   }, [size.w, size.h, aspect]);
 
   // ----------------------------------------------------------------- swipe
@@ -708,6 +719,25 @@ export function ReaderView({
               <ThemeToggle size="sm" />
               <button
                 onClick={() => {
+                  if (isZoomed) {
+                    setZoom(1);
+                  } else {
+                    setZoom(fillScale);
+                  }
+                  pinChrome();
+                }}
+                aria-label={isZoomed ? "fit page" : "fullscreen"}
+                title={isZoomed ? "fit page" : "fill screen"}
+                className="rounded-lg border-2 border-ink bg-paper text-ink hover:bg-peach-soft/40 transition shrink-0 px-2 py-1.5"
+                style={{ boxShadow: "2px 2px 0 0 var(--color-ink)" }}
+              >
+                <PixelIcon
+                  name={isZoomed ? "collapse" : "expand"}
+                  size={14}
+                />
+              </button>
+              <button
+                onClick={() => {
                   setMarkMode((v) => !v);
                   setReactMode(false);
                   setOpenAnnotationId(null);
@@ -995,6 +1025,15 @@ export function ReaderView({
                   {partnerBookmarkOnCurrentPage && partner && (
                     <PartnerBookmarkFlag accent={partner.accent} />
                   )}
+
+                  {/* Partner presence — avatar floats on the page when they're here too */}
+                  {partner && samePage && (
+                    <PartnerPresenceBadge
+                      userId={partner.userId}
+                      accent={partner.accent}
+                      displayName={partner.displayName}
+                    />
+                  )}
                 </motion.div>
               </AnimatePresence>
             </motion.div>
@@ -1195,6 +1234,39 @@ const pageVariants = {
   center: { x: 0, opacity: 1 },
   exit: (dir: number) => ({ x: dir > 0 ? -40 : 40, opacity: 0 }),
 };
+
+function PartnerPresenceBadge({
+  userId,
+  accent,
+  displayName,
+}: {
+  userId: string;
+  accent: string;
+  displayName: string;
+}) {
+  return (
+    <motion.div
+      initial={{ scale: 0, rotate: -15, opacity: 0 }}
+      animate={{ scale: 1, rotate: 0, opacity: 1 }}
+      exit={{ scale: 0, opacity: 0 }}
+      transition={{ type: "spring", stiffness: 360, damping: 16 }}
+      className="absolute top-2 left-2 z-10 flex items-center gap-1.5 rounded-full bg-paper border-2 border-ink pl-0.5 pr-2 py-0.5"
+      style={{ boxShadow: "2px 2px 0 0 var(--color-ink)" }}
+      title={`${displayName} is on this page`}
+    >
+      <motion.div
+        animate={{ scale: [1, 1.12, 1] }}
+        transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+      >
+        <Avatar seed={userId} accent={accent} size={22} />
+      </motion.div>
+      <span className="text-[10px] font-bold text-ink-soft whitespace-nowrap">
+        {displayName}
+        <span className="text-rose-deep ml-0.5">♡</span>
+      </span>
+    </motion.div>
+  );
+}
 
 function PartnerBookmarkFlag({ accent }: { accent: string }) {
   const fillMap: Record<string, string> = {
