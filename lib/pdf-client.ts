@@ -17,9 +17,9 @@ async function loadPdfjs() {
     typeof window !== "undefined" &&
     !pdfjs.GlobalWorkerOptions.workerSrc
   ) {
-    // Pin worker URL to the exact installed version — a mismatch causes
-    // pdfjs to fall back to a broken "fake worker" path.
-    pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+    // Served from /public — kept in sync with installed pdfjs via the
+    // `postinstall` script in package.json.
+    pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
   }
   return pdfjs;
 }

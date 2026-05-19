@@ -15,10 +15,10 @@ import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 
 // react-pdf / pdfjs-dist reference DOMMatrix at module evaluation, which
-// crashes during SSR. Load them client-only and configure the worker
-// once on first load. The worker URL is pinned to the *exact* pdfjs
-// version that's installed — a version mismatch makes pdfjs fall back to
-// the (broken) "fake worker" path.
+// crashes during SSR. Load them client-only. The worker file lives in
+// /public and is kept in sync with the installed pdfjs version via the
+// `postinstall` script in package.json. A version mismatch silently makes
+// pdfjs fall back to a broken "fake worker" path.
 const Document = dynamic(
   () =>
     import("react-pdf").then((m) => {
@@ -26,7 +26,7 @@ const Document = dynamic(
         typeof window !== "undefined" &&
         !m.pdfjs.GlobalWorkerOptions.workerSrc
       ) {
-        m.pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${m.pdfjs.version}/build/pdf.worker.min.mjs`;
+        m.pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
       }
       return m.Document;
     }),
