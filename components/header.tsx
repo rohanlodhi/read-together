@@ -6,7 +6,7 @@ import { Avatar } from "./avatar";
 import { PixelIcon } from "./pixel-icon";
 import { ProfileSheet } from "./profile-sheet";
 import { ThemeToggle } from "./theme-toggle";
-import { usePresence } from "@/lib/use-presence";
+import { usePartnerOnline } from "./presence-provider";
 
 export default function Header({
   userId,
@@ -26,10 +26,7 @@ export default function Header({
   } | null;
 }) {
   const [profileOpen, setProfileOpen] = useState(false);
-  const present = usePresence(userId, { kind: "library" });
-  const partnerOnline = Boolean(
-    partner && present.find((p) => p.user_id === partner.userId),
-  );
+  const partnerOnline = usePartnerOnline(partner?.userId ?? null);
 
   return (
     <header className="w-full px-5 sm:px-8 py-4 flex items-center justify-between relative z-20">

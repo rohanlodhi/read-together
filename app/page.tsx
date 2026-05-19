@@ -4,6 +4,7 @@ import Header from "@/components/header";
 import { getLibraryData } from "@/lib/data";
 import { LibraryView } from "@/components/library/library-view";
 import { AnniversaryBanner } from "@/components/anniversary-banner";
+import { PresenceProvider } from "@/components/presence-provider";
 
 export default async function Home() {
   const supabase = await createClient();
@@ -16,7 +17,7 @@ export default async function Home() {
   if (!data.me) redirect("/login");
 
   return (
-    <>
+    <PresenceProvider userId={data.me.id} location={{ kind: "library" }}>
       <Header
         userId={data.me.id}
         displayName={data.me.display_name}
@@ -38,6 +39,6 @@ export default async function Home() {
         me={data.me}
         partner={data.partner}
       />
-    </>
+    </PresenceProvider>
   );
 }

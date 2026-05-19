@@ -7,7 +7,7 @@ import { PixelIcon } from "@/components/pixel-icon";
 import { BookCard } from "./book-card";
 import { UploadBookDialog } from "./upload-book-dialog";
 import { createClient } from "@/lib/supabase/client";
-import { usePresence } from "@/lib/use-presence";
+import { usePresenceContext } from "@/components/presence-provider";
 
 type Book = {
   id: string;
@@ -40,7 +40,7 @@ export function LibraryView({
   const [lastInitial, setLastInitial] = useState<Book[]>(initialBooks);
   const router = useRouter();
 
-  const present = usePresence(me.id, { kind: "library" });
+  const present = usePresenceContext();
   const partnerPresence = useMemo(
     () => (partner ? present.find((p) => p.user_id === partner.id) : null),
     [present, partner],
