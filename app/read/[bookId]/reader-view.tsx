@@ -28,6 +28,7 @@ import { ReactionsLayer } from "@/components/reader/reactions-layer";
 import { ReactCanvas } from "@/components/reader/react-canvas";
 import type { AnnotationRow, ReactionRow, Rect } from "@/components/reader/types";
 import type { IconName } from "@/components/pixel-icon";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 const SWIPE_OFFSET = 60;
 const SWIPE_VELOCITY = 400;
@@ -93,11 +94,46 @@ export function ReaderView({
   const [openAnnotationId, setOpenAnnotationId] = useState<string | null>(
     null,
   );
+  const [scale, setScale] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chromePinned = useRef(false);
+  const gestureRef = useRef<{
+    mode: "idle" | "pinch" | "pan";
+    startDist?: number;
+    startScale?: number;
+    startX?: number;
+    startY?: number;
+    startPanX?: number;
+    startPanY?: number;
+  }>({ mode: "idle" });
+  const lastTapRef = useRef<{ t: number; x: number; y: number } | null>(null);
+
+  const MAX_SCALE = 4;
+  const MIN_SCALE = 1;
+  const isZoomed = scale > 1.001;
+
+  // Reset zoom when changing pages.
+  const [lastPageForZoom, setLastPageForZoom] = useState(page);
+  if (lastPageForZoom !== page) {
+    setLastPageForZoom(page);
+    if (isZoomed) {
+      setScale(1);
+      setPan({ x: 0, y: 0 });
+    }
+  }
+
+  const setZoom = useCallback(
+    (nextScale: number) => {
+      const s = Math.max(MIN_SCALE, Math.min(MAX_SCALE, nextScale));
+      setScale(s);
+      if (s === 1) setPan({ x: 0, y: 0 });
+    },
+    [],
+  );
 
   const file = useMemo(() => ({ url: pdfUrl }), [pdfUrl]);
 
@@ -614,7 +650,7 @@ export function ReaderView({
     [annotationOwner],
   );
 
-  const dragDisabled = markMode || reactMode;
+  const dragDisabled = markMode || reactMode || isZoomed;
 
   const samePage = partnerPage === page;
   const canPrev = page > 1;
@@ -669,6 +705,7 @@ export function ReaderView({
             </div>
 
             <div className="flex items-center gap-1.5 shrink-0">
+              <ThemeToggle size="sm" />
               <button
                 onClick={() => {
                   setMarkMode((v) => !v);
@@ -750,8 +787,29 @@ export function ReaderView({
               dragConstraints={{ left: 0, right: 0 }}
               dragElastic={0.18}
               dragSnapToOrigin
-              onTap={() => {
-                if (dragDisabled) return;
+              onTap={(e, info) => {
+                if (markMode || reactMode) return;
+                if (isZoomed) return;
+                // double-tap detection for zoom toggle
+                const now = Date.now();
+                const last = lastTapRef.current;
+                if (
+                  last &&
+                  now - last.t < 300 &&
+                  Math.hypot(
+                    info.point.x - last.x,
+                    info.point.y - last.y,
+                  ) < 24
+                ) {
+                  setZoom(2);
+                  lastTapRef.current = null;
+                  return;
+                }
+                lastTapRef.current = {
+                  t: now,
+                  x: info.point.x,
+                  y: info.point.y,
+                };
                 if (openAnnotationId) {
                   setOpenAnnotationId(null);
                   unpinChrome();
@@ -766,7 +824,68 @@ export function ReaderView({
                 height: pageHeight,
                 maxWidth: "100%",
                 maxHeight: "100%",
-                touchAction: dragDisabled ? "none" : "pan-y",
+                touchAction:
+                  dragDisabled || isZoomed ? "none" : "pan-y",
+              }}
+              onTouchStart={(e) => {
+                if (e.touches.length === 2) {
+                  const [a, b] = [e.touches[0], e.touches[1]];
+                  gestureRef.current = {
+                    mode: "pinch",
+                    startDist: Math.hypot(
+                      a.clientX - b.clientX,
+                      a.clientY - b.clientY,
+                    ),
+                    startScale: scale,
+                  };
+                } else if (e.touches.length === 1 && isZoomed) {
+                  gestureRef.current = {
+                    mode: "pan",
+                    startX: e.touches[0].clientX,
+                    startY: e.touches[0].clientY,
+                    startPanX: pan.x,
+                    startPanY: pan.y,
+                  };
+                }
+              }}
+              onTouchMove={(e) => {
+                const g = gestureRef.current;
+                if (g.mode === "pinch" && e.touches.length === 2) {
+                  e.preventDefault();
+                  const [a, b] = [e.touches[0], e.touches[1]];
+                  const dist = Math.hypot(
+                    a.clientX - b.clientX,
+                    a.clientY - b.clientY,
+                  );
+                  const next =
+                    ((g.startScale ?? 1) * dist) / (g.startDist ?? dist);
+                  setZoom(next);
+                } else if (
+                  g.mode === "pan" &&
+                  e.touches.length === 1 &&
+                  isZoomed
+                ) {
+                  e.preventDefault();
+                  const dx = e.touches[0].clientX - (g.startX ?? 0);
+                  const dy = e.touches[0].clientY - (g.startY ?? 0);
+                  setPan({
+                    x: (g.startPanX ?? 0) + dx,
+                    y: (g.startPanY ?? 0) + dy,
+                  });
+                }
+              }}
+              onTouchEnd={(e) => {
+                if (e.touches.length === 0) {
+                  gestureRef.current = { mode: "idle" };
+                } else if (e.touches.length === 1 && isZoomed) {
+                  gestureRef.current = {
+                    mode: "pan",
+                    startX: e.touches[0].clientX,
+                    startY: e.touches[0].clientY,
+                    startPanX: pan.x,
+                    startPanY: pan.y,
+                  };
+                }
               }}
             >
               <AnimatePresence custom={direction} initial={false}>
@@ -787,56 +906,67 @@ export function ReaderView({
                     className="w-full h-full bg-white border-2 border-ink rounded-md overflow-hidden relative"
                     style={{ boxShadow: "5px 5px 0 0 var(--color-ink)" }}
                   >
-                    <Page
-                      pageNumber={page}
-                      width={pageWidth}
-                      renderAnnotationLayer={false}
-                      renderTextLayer={false}
-                      onLoadSuccess={(pdfPage) => {
-                        const vp = pdfPage.getViewport({ scale: 1 });
-                        const a = vp.width / vp.height;
-                        if (
-                          Number.isFinite(a) &&
-                          Math.abs(a - aspect) > 0.01
-                        ) {
-                          setAspect(a);
+                    <div
+                      className="absolute inset-0 origin-center"
+                      style={{
+                        transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`,
+                        transition: gestureRef.current.mode === "idle"
+                          ? "transform 0.18s ease"
+                          : "none",
+                        willChange: "transform",
+                      }}
+                    >
+                      <Page
+                        pageNumber={page}
+                        width={pageWidth}
+                        renderAnnotationLayer={false}
+                        renderTextLayer={false}
+                        onLoadSuccess={(pdfPage) => {
+                          const vp = pdfPage.getViewport({ scale: 1 });
+                          const a = vp.width / vp.height;
+                          if (
+                            Number.isFinite(a) &&
+                            Math.abs(a - aspect) > 0.01
+                          ) {
+                            setAspect(a);
+                          }
+                        }}
+                        loading={
+                          <PageSkeleton width={pageWidth} aspect={aspect} />
                         }
-                      }}
-                      loading={
-                        <PageSkeleton width={pageWidth} aspect={aspect} />
-                      }
-                    />
-
-                    <HighlightLayer
-                      annotations={pageAnnotations}
-                      onTap={(id) => {
-                        setOpenAnnotationId(id);
-                        pinChrome();
-                      }}
-                      selectedId={openAnnotationId}
-                    />
-
-                    <ReactionsLayer
-                      reactions={pageReactions}
-                      myUserId={me?.userId ?? null}
-                      ownerAccent={reactionAccentFor}
-                      onDeleteMine={deleteReaction}
-                    />
-
-                    {markMode && me && (
-                      <MarkCanvas
-                        accent={me.accent}
-                        onCommit={commitHighlight}
-                        onCancel={() => setMarkMode(false)}
                       />
-                    )}
 
-                    {reactMode && me && (
-                      <ReactCanvas
-                        onDrop={dropReaction}
-                        onCancel={() => setReactMode(false)}
+                      <HighlightLayer
+                        annotations={pageAnnotations}
+                        onTap={(id) => {
+                          setOpenAnnotationId(id);
+                          pinChrome();
+                        }}
+                        selectedId={openAnnotationId}
                       />
-                    )}
+
+                      <ReactionsLayer
+                        reactions={pageReactions}
+                        myUserId={me?.userId ?? null}
+                        ownerAccent={reactionAccentFor}
+                        onDeleteMine={deleteReaction}
+                      />
+
+                      {markMode && me && (
+                        <MarkCanvas
+                          accent={me.accent}
+                          onCommit={commitHighlight}
+                          onCancel={() => setMarkMode(false)}
+                        />
+                      )}
+
+                      {reactMode && me && (
+                        <ReactCanvas
+                          onDrop={dropReaction}
+                          onCancel={() => setReactMode(false)}
+                        />
+                      )}
+                    </div>
 
                     {openAnnotation && (
                       <AnnotationBubble
@@ -881,7 +1011,7 @@ export function ReaderView({
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 64, opacity: 0 }}
             transition={{ duration: 0.18 }}
-            className="absolute bottom-0 left-0 right-0 z-30 px-3 sm:px-6 py-2.5 flex items-center justify-between gap-2 sm:gap-3 bg-cream/95 backdrop-blur border-t-2 border-ink-soft"
+            className="absolute bottom-0 left-0 right-0 z-30 px-2 sm:px-6 py-2 sm:py-2.5 flex items-center justify-between gap-1.5 sm:gap-3 bg-cream/95 backdrop-blur border-t-2 border-ink-soft"
             style={{
               paddingBottom:
                 "calc(0.625rem + env(safe-area-inset-bottom, 0))",
@@ -891,7 +1021,7 @@ export function ReaderView({
               onClick={() => goPrev()}
               disabled={!canPrev}
               aria-label="previous page"
-              className="rounded-lg bg-paper border-2 border-ink px-2.5 py-1.5 text-ink hover:bg-peach-soft/40 disabled:opacity-40 disabled:cursor-not-allowed transition shrink-0"
+              className="rounded-lg bg-paper border-2 border-ink px-2 py-1.5 sm:px-2.5 text-ink hover:bg-peach-soft/40 disabled:opacity-40 disabled:cursor-not-allowed transition shrink-0"
               style={{ boxShadow: "3px 3px 0 0 var(--color-ink)" }}
             >
               <PixelIcon name="chevron-left" size={16} />
@@ -900,7 +1030,7 @@ export function ReaderView({
             <button
               onClick={toggleCurrentBookmark}
               aria-label={isBookmarked ? "remove bookmark" : "bookmark page"}
-              className={`rounded-lg border-2 border-ink px-2.5 py-1.5 transition shrink-0 ${
+              className={`rounded-lg border-2 border-ink px-2 py-1.5 sm:px-2.5 transition shrink-0 ${
                 isBookmarked
                   ? "bg-rose-soft text-rose-deep"
                   : "bg-paper text-ink hover:bg-peach-soft/40"
@@ -929,15 +1059,15 @@ export function ReaderView({
               {partner && partnerPage && !samePage && (
                 <button
                   onClick={() => jumpTo(partnerPage)}
-                  className="pill hover:bg-peach-soft/30 shrink-0"
+                  className="pill hover:bg-peach-soft/30 shrink-0 !px-2 !py-1 sm:!px-2.5 sm:!py-1.5"
+                  title={`${partner.displayName} is on page ${partnerPage} — jump?`}
                 >
                   <Avatar
                     seed={partner.userId}
                     accent={partner.accent}
-                    size={16}
+                    size={14}
                   />
-                  p.{partnerPage}
-                  <span className="hidden sm:inline">— jump?</span>
+                  <span className="text-[11px] sm:text-xs">p.{partnerPage}</span>
                 </button>
               )}
               {partner && samePage && (
@@ -945,20 +1075,21 @@ export function ReaderView({
                   initial={{ scale: 0.6, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
                   transition={{ type: "spring", stiffness: 280, damping: 16 }}
-                  className="pill shrink-0"
+                  className="pill shrink-0 !px-2 !py-1 sm:!px-2.5 sm:!py-1.5"
                   style={{ background: "var(--color-rose-soft)" }}
+                  title="same page"
                 >
                   <Avatar
                     seed={partner.userId}
                     accent={partner.accent}
-                    size={16}
+                    size={14}
                   />
                   <PixelIcon
                     name="heart"
                     size={12}
                     className="text-rose-deep"
                   />
-                  same page
+                  <span className="hidden sm:inline text-xs">same page</span>
                 </motion.div>
               )}
             </div>
@@ -969,7 +1100,7 @@ export function ReaderView({
                 pinChrome();
               }}
               aria-label="open bookmarks"
-              className="rounded-lg bg-paper border-2 border-ink px-2.5 py-1.5 text-ink hover:bg-peach-soft/40 transition shrink-0 relative"
+              className="rounded-lg bg-paper border-2 border-ink px-2 py-1.5 sm:px-2.5 text-ink hover:bg-peach-soft/40 transition shrink-0 relative"
               style={{ boxShadow: "3px 3px 0 0 var(--color-ink)" }}
             >
               <PixelIcon name="bookmarks" size={16} />
@@ -984,10 +1115,55 @@ export function ReaderView({
               onClick={() => goNext()}
               disabled={!canNext}
               aria-label="next page"
-              className="rounded-lg bg-paper border-2 border-ink px-2.5 py-1.5 text-ink hover:bg-peach-soft/40 disabled:opacity-40 disabled:cursor-not-allowed transition shrink-0"
+              className="rounded-lg bg-paper border-2 border-ink px-2 py-1.5 sm:px-2.5 text-ink hover:bg-peach-soft/40 disabled:opacity-40 disabled:cursor-not-allowed transition shrink-0"
               style={{ boxShadow: "3px 3px 0 0 var(--color-ink)" }}
             >
               <PixelIcon name="chevron-right" size={16} />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isZoomed && (
+          <motion.div
+            key="zoom-pill"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 10 }}
+            transition={{ type: "spring", stiffness: 320, damping: 22 }}
+            className="absolute left-1/2 -translate-x-1/2 z-40 pill"
+            style={{
+              bottom: "calc(4rem + env(safe-area-inset-bottom, 0))",
+              background: "var(--color-paper)",
+            }}
+          >
+            <button
+              onClick={() => setZoom(scale - 0.5)}
+              aria-label="zoom out"
+              className="rounded-full p-1 text-ink hover:bg-cream-deep/40"
+            >
+              <PixelIcon name="chevron-left" size={14} />
+            </button>
+            <span className="text-xs font-bold tabular-nums">
+              {Math.round(scale * 100)}%
+            </span>
+            <button
+              onClick={() => setZoom(scale + 0.5)}
+              aria-label="zoom in"
+              className="rounded-full p-1 text-ink hover:bg-cream-deep/40"
+            >
+              <PixelIcon name="chevron-right" size={14} />
+            </button>
+            <button
+              onClick={() => {
+                setZoom(1);
+              }}
+              aria-label="reset zoom"
+              className="ml-1 rounded-full px-2 py-0.5 text-[10px] font-bold border-2 border-ink bg-cream hover:bg-peach-soft/40"
+              style={{ boxShadow: "1px 1px 0 0 var(--color-ink)" }}
+            >
+              fit
             </button>
           </motion.div>
         )}
@@ -1074,7 +1250,7 @@ function PageJumper({
   };
 
   return (
-    <div className="text-sm font-bold text-ink-soft tabular-nums flex items-center gap-1 shrink-0">
+    <div className="text-xs sm:text-sm font-bold text-ink-soft tabular-nums flex items-center gap-1 shrink min-w-0">
       {editing ? (
         <input
           autoFocus
@@ -1090,7 +1266,7 @@ function PageJumper({
               onUnpin();
             }
           }}
-          className="w-14 text-center rounded-lg bg-paper border-2 border-ink px-2 py-1 focus:outline-none"
+          className="w-12 sm:w-14 text-center rounded-lg bg-paper border-2 border-ink px-1.5 sm:px-2 py-1 focus:outline-none"
         />
       ) : (
         <button
@@ -1098,12 +1274,15 @@ function PageJumper({
             setEditing(true);
             onPin();
           }}
-          className="rounded-lg px-2.5 py-1 hover:bg-peach-soft/40 transition"
+          className="rounded-lg px-2 sm:px-2.5 py-1 hover:bg-peach-soft/40 transition whitespace-nowrap"
         >
-          page {page}
+          <span className="hidden sm:inline">page </span>
+          {page}
         </button>
       )}
-      {total > 0 && <span className="text-ink-faint">of {total}</span>}
+      {total > 0 && (
+        <span className="text-ink-faint whitespace-nowrap">/ {total}</span>
+      )}
     </div>
   );
 }

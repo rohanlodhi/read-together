@@ -94,7 +94,7 @@ export function ProfileSheet({
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
           onClick={() => !saving && onClose()}
         >
-          <div className="absolute inset-0 bg-ink/30 backdrop-blur-sm" />
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
 
           <motion.div
             initial={{ opacity: 0, y: 16, scale: 0.96 }}

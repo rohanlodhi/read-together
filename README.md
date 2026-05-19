@@ -1,13 +1,6 @@
-# read‑together 📖💞
+# read‑together
 
-A tiny shared PDF reader for two long‑distance readers. See each other's pages, bookmarks, highlights, notes, and stickers in real time.
-
-## Stack
-
-- Next.js 16 (App Router) + TypeScript + Tailwind v4
-- Supabase (Postgres + Storage + Realtime + Auth)
-- `react-pdf` for rendering, `motion` for animations
-- Deployed on Vercel
+A tiny shared PDF reader for real time collaborative reading.
 
 ## First-time setup
 
@@ -65,40 +58,4 @@ npm install
 npm run dev
 ```
 
-Open <http://localhost:3000>.
-
-## Deploying
-
-Push to GitHub, import on Vercel, paste the same env vars. Add your production URL to the Supabase Site URL and to the `emailRedirectTo` allowlist.
-
-## Project layout
-
-```
-app/
-  layout.tsx              cute fonts + toaster
-  page.tsx                home (library — wip)
-  login/                  magic-link sign-in
-  auth/callback/          OTP verify + session redirect
-  auth/sign-out/          sign out POST
-components/               shared UI
-lib/
-  supabase/
-    client.ts             browser client
-    server.ts             server client (cookies)
-    middleware.ts         session refresh + allowlist gate
-    types.ts              DB row types
-  auth/allowlist.ts       email allowlist helper
-  utils.ts                cn() helper
-proxy.ts                  Next 16 proxy (auth gate)
-supabase/migrations/      SQL — run these on the Supabase project
-```
-
-## Roadmap (2 weeks)
-
-- [x] Days 1–2: scaffold, theme, auth, schema
-- [ ] Days 3–4: PDF upload, library, reader
-- [ ] Days 5–7: realtime presence, bookmarks
-- [ ] Days 8–10: highlights + notes
-- [ ] Days 11–12: reactions + animations
-- [ ] Day 13: mobile QA, seed real books
-- [ ] Day 14: anniversary easter eggs ✨
+Open <http://localhost:3000>

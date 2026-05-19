@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Pixelify_Sans, M_PLUS_Rounded_1c, Caveat } from "next/font/google";
 import { Toaster } from "react-hot-toast";
+import { themeInitScript } from "@/components/theme-toggle";
 import "./globals.css";
 
 // Display: Pixelify Sans — chunky pixel display, classic 2D-game UI.
@@ -40,6 +41,9 @@ export default function RootLayout({
       lang="en"
       className={`${pixelify.variable} ${mplus.variable} ${caveat.variable} h-full antialiased`}
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
       <body className="min-h-full flex flex-col relative overflow-x-hidden">
         {children}
         <Toaster

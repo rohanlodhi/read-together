@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --color-cream: #fff8f0;
   --color-cream-deep: #fdecd9;
@@ -44,6 +46,37 @@
   color-scheme: light;
 }
 
+html.dark {
+  color-scheme: dark;
+
+  --color-cream: #1a1411;
+  --color-cream-deep: #241b16;
+  --color-paper: #2a201a;
+  --color-ink: #f4e7d3;
+  --color-ink-soft: #c9b29a;
+  --color-ink-faint: #7a6754;
+
+  --color-peach: #c97e6e;
+  --color-peach-soft: #5a3c33;
+  --color-peach-deep: #ffb5a7;
+
+  --color-lavender: #9886d6;
+  --color-lavender-soft: #3d3354;
+  --color-lavender-deep: #c8b6ff;
+
+  --color-sage: #7eae82;
+  --color-sage-soft: #2f4632;
+  --color-sage-deep: #a8d4ab;
+
+  --color-rose: #c97a99;
+  --color-rose-soft: #4d2c3a;
+  --color-rose-deep: #ffa8c9;
+
+  --color-sun: #d4b35e;
+  --color-sun-soft: #4a3a1c;
+  --color-sun-deep: #ffd97a;
+}
+
 html,
 body {
   min-height: 100%;
@@ -59,6 +92,13 @@ body {
     radial-gradient(circle at 88% 14%, rgba(200, 182, 255, 0.16), transparent 38%),
     radial-gradient(circle at 60% 92%, rgba(255, 217, 122, 0.18), transparent 42%);
   background-attachment: fixed;
+}
+
+html.dark body {
+  background-image:
+    radial-gradient(circle at 12% 8%, rgba(201, 126, 110, 0.14), transparent 35%),
+    radial-gradient(circle at 88% 14%, rgba(152, 134, 214, 0.12), transparent 38%),
+    radial-gradient(circle at 60% 92%, rgba(212, 179, 94, 0.14), transparent 42%);
 }
 
 ::-webkit-scrollbar {

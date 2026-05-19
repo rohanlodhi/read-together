@@ -237,7 +237,7 @@ export function BookCard(props: BookCardProps) {
             className="fixed inset-0 z-50 flex items-center justify-center p-4"
             onClick={() => !pending && setConfirmOpen(false)}
           >
-            <div className="absolute inset-0 bg-ink/30 backdrop-blur-sm" />
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
             <motion.div
               initial={{ y: 12, opacity: 0, scale: 0.96 }}
               animate={{ y: 0, opacity: 1, scale: 1 }}

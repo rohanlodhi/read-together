@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Avatar } from "./avatar";
 import { PixelIcon } from "./pixel-icon";
 import { ProfileSheet } from "./profile-sheet";
+import { ThemeToggle } from "./theme-toggle";
 
 export default function Header({
   userId,
@@ -42,6 +43,7 @@ export default function Header({
       </Link>
 
       <div className="flex items-center gap-2 sm:gap-3">
+        <ThemeToggle />
         {partner && (
           <div
             className="hidden sm:flex items-center gap-1.5 rounded-full bg-paper/80 border-2 border-ink-soft pl-1 pr-2.5 py-0.5"
