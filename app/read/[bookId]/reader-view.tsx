@@ -17,15 +17,16 @@ import "react-pdf/dist/Page/TextLayer.css";
 // react-pdf / pdfjs-dist reference DOMMatrix at module evaluation, which
 // crashes during SSR. Load them client-only. The worker file lives in
 // /public and is kept in sync with the installed pdfjs version via the
-// `postinstall` script in package.json. A version mismatch silently makes
-// pdfjs fall back to a broken "fake worker" path.
+// `copy-pdf-worker` build script.
+//
+// NOTE: always overwrite `workerSrc` unconditionally. react-pdf pre-sets it
+// to a bare module specifier (e.g. "pdf.worker.mjs") at import time, which
+// the browser can't resolve — it then 404s and falls back to a broken
+// "fake worker" path. A conditional `if (!workerSrc)` would skip our fix.
 const Document = dynamic(
   () =>
     import("react-pdf").then((m) => {
-      if (
-        typeof window !== "undefined" &&
-        !m.pdfjs.GlobalWorkerOptions.workerSrc
-      ) {
+      if (typeof window !== "undefined") {
         m.pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
       }
       return m.Document;
