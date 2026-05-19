@@ -35,11 +35,13 @@ export function Avatar({
   seed,
   size = 32,
   accent = "peach",
+  online,
   className,
 }: {
   seed: string;
   size?: number;
   accent?: string;
+  online?: boolean;
   className?: string;
 }) {
   const bg = ACCENT_HEX[accent] ?? ACCENT_HEX.peach;
@@ -52,10 +54,12 @@ export function Avatar({
       radius: "50",
     }).toString();
 
+  const dotSize = Math.max(8, Math.round(size * 0.32));
+
   return (
     <span
       className={cn(
-        "inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full border-2",
+        "relative inline-flex shrink-0 items-center justify-center rounded-full border-2",
         ACCENT_BG[accent] ?? "bg-peach-soft",
         ACCENT_BORDER[accent] ?? "border-peach-deep",
         className,
@@ -68,9 +72,23 @@ export function Avatar({
         alt=""
         width={size}
         height={size}
-        className="w-full h-full object-cover"
+        className="w-full h-full object-cover rounded-full"
         style={{ imageRendering: "pixelated" }}
       />
+      {online && (
+        <span
+          aria-label="online"
+          className="absolute rounded-full border-2 border-paper"
+          style={{
+            width: dotSize,
+            height: dotSize,
+            bottom: -dotSize * 0.18,
+            right: -dotSize * 0.18,
+            background: "var(--color-sage-deep)",
+            boxShadow: "0 0 6px var(--color-sage-deep)",
+          }}
+        />
+      )}
     </span>
   );
 }

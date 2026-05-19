@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
 import { PixelIcon } from "@/components/pixel-icon";
 import { BookCard } from "./book-card";
 import { UploadBookDialog } from "./upload-book-dialog";
 import { createClient } from "@/lib/supabase/client";
+import { usePresence } from "@/lib/use-presence";
 
 type Book = {
   id: string;
@@ -38,6 +39,17 @@ export function LibraryView({
   const [books, setBooks] = useState<Book[]>(initialBooks);
   const [lastInitial, setLastInitial] = useState<Book[]>(initialBooks);
   const router = useRouter();
+
+  const present = usePresence(me.id, { kind: "library" });
+  const partnerPresence = useMemo(
+    () => (partner ? present.find((p) => p.user_id === partner.id) : null),
+    [present, partner],
+  );
+  const partnerOnline = Boolean(partnerPresence);
+  const partnerReadingBookId =
+    partnerPresence?.location.kind === "book"
+      ? partnerPresence.location.book_id
+      : null;
 
   // Re-derive from server props when revalidatePath updates them.
   if (lastInitial !== initialBooks) {
@@ -176,6 +188,8 @@ export function LibraryView({
                           displayName: partner.display_name,
                           accent: partner.accent,
                           page: b.partner_page,
+                          online: partnerOnline,
+                          inThisBook: partnerReadingBookId === b.id,
                         }
                       : null
                   }

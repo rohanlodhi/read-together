@@ -6,6 +6,7 @@ import { Avatar } from "./avatar";
 import { PixelIcon } from "./pixel-icon";
 import { ProfileSheet } from "./profile-sheet";
 import { ThemeToggle } from "./theme-toggle";
+import { usePresence } from "@/lib/use-presence";
 
 export default function Header({
   userId,
@@ -25,6 +26,10 @@ export default function Header({
   } | null;
 }) {
   const [profileOpen, setProfileOpen] = useState(false);
+  const present = usePresence(userId, { kind: "library" });
+  const partnerOnline = Boolean(
+    partner && present.find((p) => p.user_id === partner.userId),
+  );
 
   return (
     <header className="w-full px-5 sm:px-8 py-4 flex items-center justify-between relative z-20">
@@ -47,15 +52,20 @@ export default function Header({
         {partner && (
           <div
             className="hidden sm:flex items-center gap-1.5 rounded-full bg-paper/80 border-2 border-ink-soft pl-1 pr-2.5 py-0.5"
-            title={`${partner.displayName} is reading with you`}
+            title={
+              partnerOnline
+                ? `${partner.displayName} is online`
+                : `${partner.displayName}`
+            }
           >
             <Avatar
               seed={partner.userId}
               accent={partner.accent}
               size={20}
+              online={partnerOnline}
             />
             <span className="text-xs font-bold text-ink-faint">
-              with {partner.displayName}
+              {partnerOnline ? `${partner.displayName} is here` : `with ${partner.displayName}`}
             </span>
           </div>
         )}

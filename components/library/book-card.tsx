@@ -34,6 +34,8 @@ export type BookCardProps = {
     displayName: string;
     accent: string;
     page: number | null;
+    online?: boolean;
+    inThisBook?: boolean;
   } | null;
   index?: number;
 };
@@ -124,6 +126,28 @@ export function BookCard(props: BookCardProps) {
               same page
             </motion.div>
           )}
+          {partner?.inThisBook && (
+            <motion.div
+              initial={{ y: 6, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ type: "spring", stiffness: 260, damping: 18 }}
+              className="absolute bottom-2 left-2 pill"
+              style={{ background: "var(--color-sage-soft)" }}
+            >
+              <span
+                className="rounded-full"
+                style={{
+                  width: 8,
+                  height: 8,
+                  background: "var(--color-sage-deep)",
+                  boxShadow: "0 0 6px var(--color-sage-deep)",
+                }}
+              />
+              <span className="text-[10px] sm:text-xs">
+                {partner.displayName} is reading
+              </span>
+            </motion.div>
+          )}
         </div>
 
         <div className="p-3.5">
@@ -156,6 +180,7 @@ export function BookCard(props: BookCardProps) {
                 page={partner.page}
                 total={totalPages}
                 pct={partnerPct}
+                online={partner.online}
               />
             )}
           </div>
@@ -300,6 +325,7 @@ function ProgressRow({
   page,
   total,
   pct,
+  online,
 }: {
   userId: string;
   accent: string;
@@ -307,10 +333,11 @@ function ProgressRow({
   page: number | null;
   total: number | null;
   pct: number;
+  online?: boolean;
 }) {
   return (
     <div className="flex items-center gap-2">
-      <Avatar seed={userId} accent={accent} size={22} />
+      <Avatar seed={userId} accent={accent} size={22} online={online} />
       <span className="text-xs font-bold text-ink-soft min-w-0 truncate">
         {label}
       </span>

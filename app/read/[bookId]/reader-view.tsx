@@ -29,6 +29,7 @@ import { ReactCanvas } from "@/components/reader/react-canvas";
 import type { AnnotationRow, ReactionRow, Rect } from "@/components/reader/types";
 import type { IconName } from "@/components/pixel-icon";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { usePresence } from "@/lib/use-presence";
 
 const SWIPE_OFFSET = 60;
 const SWIPE_VELOCITY = 400;
@@ -101,6 +102,49 @@ export function ReaderView({
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chromePinned = useRef(false);
+  const channelRef = useRef<ReturnType<
+    ReturnType<typeof createClient>["channel"]
+  > | null>(null);
+
+  const [incomingHearts, setIncomingHearts] = useState<
+    Array<{ id: string; x: number }>
+  >([]);
+
+  const burstHeart = useCallback(() => {
+    const id = crypto.randomUUID();
+    // small horizontal jitter so back-to-back hearts don't stack
+    const x = 0.5 + (Math.random() - 0.5) * 0.3;
+    setIncomingHearts((hs) => [...hs, { id, x }]);
+    setTimeout(() => {
+      setIncomingHearts((hs) => hs.filter((h) => h.id !== id));
+    }, 2400);
+  }, []);
+
+  // ----------------------------------------------------------------- presence
+  const present = usePresence(
+    me?.userId ?? null,
+    me ? { kind: "book", book_id: bookId, page } : null,
+  );
+  const partnerPresence = useMemo(
+    () =>
+      partner ? present.find((p) => p.user_id === partner.userId) : null,
+    [present, partner],
+  );
+  const partnerOnline = Boolean(partnerPresence);
+  const partnerInThisBook =
+    partnerPresence?.location.kind === "book" &&
+    partnerPresence.location.book_id === bookId;
+
+  const sendHeart = useCallback(() => {
+    burstHeart(); // immediate local feedback
+    const ch = channelRef.current;
+    if (!ch || !me) return;
+    ch.send({
+      type: "broadcast",
+      event: "heart",
+      payload: { from: me.userId, t: Date.now() },
+    }).catch((e) => console.warn("heart send failed", e));
+  }, [burstHeart, me]);
   const gestureRef = useRef<{
     mode: "idle" | "pinch" | "pan";
     startDist?: number;
@@ -290,12 +334,59 @@ export function ReaderView({
           }
         },
       )
-      .subscribe();
+      .on("broadcast", { event: "heart" }, (msg) => {
+        const from = (msg.payload as { from?: string } | null)?.from;
+        if (!from || (me && from === me.userId)) return;
+        burstHeart();
+      })
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.warn(`realtime channel status: ${status}`);
+        }
+      });
+
+    channelRef.current = channel;
 
     return () => {
       supabase.removeChannel(channel);
+      channelRef.current = null;
     };
-  }, [bookId, partner]);
+  }, [bookId, partner, me, burstHeart]);
+
+  // ----------------------------------------------------- refetch on refocus
+  // Safety net: if realtime dropped a message while the tab was backgrounded
+  // we re-pull the collab tables when the user returns.
+  useEffect(() => {
+    const onFocus = async () => {
+      if (document.visibilityState !== "visible") return;
+      const supabase = createClient();
+      const [bm, an, rx] = await Promise.all([
+        supabase
+          .from("bookmarks")
+          .select("id, user_id, book_id, page, label, color, created_at")
+          .eq("book_id", bookId),
+        supabase
+          .from("annotations")
+          .select(
+            "id, user_id, book_id, page, kind, rects, selected_text, note_content, color, created_at",
+          )
+          .eq("book_id", bookId),
+        supabase
+          .from("reactions")
+          .select("id, user_id, book_id, page, emoji, x, y, created_at")
+          .eq("book_id", bookId),
+      ]);
+      if (bm.data) setBookmarks(bm.data);
+      if (an.data) setAnnotations(an.data as AnnotationRow[]);
+      if (rx.data) setReactions(rx.data as ReactionRow[]);
+    };
+    document.addEventListener("visibilitychange", onFocus);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      document.removeEventListener("visibilitychange", onFocus);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [bookId]);
 
   // ----------------------------------------------------------------- save
   useEffect(() => {
@@ -379,29 +470,39 @@ export function ReaderView({
   }, [total, goNext, goPrev, showChrome]);
 
   // ----------------------------------------------------------- page sizing
-  const { pageWidth, pageHeight, ready, fillScale } = useMemo(() => {
+  const [fullscreen, setFullscreen] = useState(false);
+
+  useEffect(() => {
+    const onChange = () => setFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  const toggleFullscreen = useCallback(async () => {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else {
+        await document.documentElement.requestFullscreen();
+      }
+    } catch (e) {
+      console.warn("fullscreen toggle failed", e);
+      // iOS Safari etc. — silently fall through.
+    }
+  }, []);
+
+  const { pageWidth, pageHeight, ready } = useMemo(() => {
     if (size.w === 0 || size.h === 0) {
-      return { pageWidth: 0, pageHeight: 0, ready: false, fillScale: 1 };
+      return { pageWidth: 0, pageHeight: 0, ready: false };
     }
     const isMobile = size.w < 640;
-    const pad = isMobile ? 6 : 28;
+    const pad = fullscreen ? 0 : isMobile ? 6 : 28;
     const maxW = size.w - pad * 2;
     const maxH = size.h - pad * 2;
     const w = Math.floor(Math.min(maxW, maxH * aspect));
     const h = Math.floor(w / aspect);
-    // Scale that makes the page cover the full container — bigger axis fills,
-    // the other overflows and becomes pannable via the zoom infrastructure.
-    const fill =
-      h > 0 && w > 0
-        ? Math.max(size.w / w, size.h / h)
-        : 1;
-    return {
-      pageWidth: w,
-      pageHeight: h,
-      ready: true,
-      fillScale: Math.max(1, Math.min(MAX_SCALE, fill)),
-    };
-  }, [size.w, size.h, aspect]);
+    return { pageWidth: w, pageHeight: h, ready: true };
+  }, [size.w, size.h, aspect, fullscreen]);
 
   // ----------------------------------------------------------------- swipe
   const onDragEnd = (_: unknown, info: PanInfo) => {
@@ -719,20 +820,20 @@ export function ReaderView({
               <ThemeToggle size="sm" />
               <button
                 onClick={() => {
-                  if (isZoomed) {
-                    setZoom(1);
-                  } else {
-                    setZoom(fillScale);
-                  }
+                  toggleFullscreen();
                   pinChrome();
                 }}
-                aria-label={isZoomed ? "fit page" : "fullscreen"}
-                title={isZoomed ? "fit page" : "fill screen"}
-                className="rounded-lg border-2 border-ink bg-paper text-ink hover:bg-peach-soft/40 transition shrink-0 px-2 py-1.5"
+                aria-label={fullscreen ? "exit fullscreen" : "fullscreen"}
+                title={fullscreen ? "exit fullscreen" : "fullscreen"}
+                className={`rounded-lg border-2 border-ink transition shrink-0 px-2 py-1.5 ${
+                  fullscreen
+                    ? "bg-sage-soft text-ink"
+                    : "bg-paper text-ink hover:bg-peach-soft/40"
+                }`}
                 style={{ boxShadow: "2px 2px 0 0 var(--color-ink)" }}
               >
                 <PixelIcon
-                  name={isZoomed ? "collapse" : "expand"}
+                  name={fullscreen ? "collapse" : "expand"}
                   size={14}
                 />
               </button>
@@ -772,16 +873,30 @@ export function ReaderView({
               </button>
               <div className="flex items-center -space-x-2">
                 {partner && (
-                  <div
-                    title={`reading with ${partner.displayName}`}
-                    className="relative rounded-full border-2 border-paper"
+                  <motion.button
+                    onClick={sendHeart}
+                    whileTap={{ scale: 0.9 }}
+                    title={
+                      partnerOnline
+                        ? `${partner.displayName} is online — tap to send a heart`
+                        : `send ${partner.displayName} a heart`
+                    }
+                    aria-label={`send ${partner.displayName} a heart`}
+                    className="relative rounded-full border-2 border-paper hover:scale-110 transition"
                   >
                     <Avatar
                       seed={partner.userId}
                       accent={partner.accent}
                       size={22}
+                      online={partnerOnline}
                     />
-                  </div>
+                    <span
+                      className="absolute -bottom-1 -left-1 inline-flex items-center justify-center rounded-full bg-rose-deep text-paper border-2 border-paper"
+                      style={{ width: 14, height: 14 }}
+                    >
+                      <PixelIcon name="heart" size={8} />
+                    </span>
+                  </motion.button>
                 )}
                 {me && (
                   <div
@@ -1032,6 +1147,7 @@ export function ReaderView({
                       userId={partner.userId}
                       accent={partner.accent}
                       displayName={partner.displayName}
+                      onSendHeart={sendHeart}
                     />
                   )}
                 </motion.div>
@@ -1099,12 +1215,17 @@ export function ReaderView({
                 <button
                   onClick={() => jumpTo(partnerPage)}
                   className="pill hover:bg-peach-soft/30 shrink-0 !px-2 !py-1 sm:!px-2.5 sm:!py-1.5"
-                  title={`${partner.displayName} is on page ${partnerPage} — jump?`}
+                  title={
+                    partnerInThisBook
+                      ? `${partner.displayName} is reading on page ${partnerPage} — jump?`
+                      : `${partner.displayName} left off on page ${partnerPage}`
+                  }
                 >
                   <Avatar
                     seed={partner.userId}
                     accent={partner.accent}
                     size={14}
+                    online={partnerInThisBook}
                   />
                   <span className="text-[11px] sm:text-xs">p.{partnerPage}</span>
                 </button>
@@ -1162,6 +1283,35 @@ export function ReaderView({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Live heart bursts */}
+      <div className="pointer-events-none absolute inset-0 z-[60] overflow-hidden">
+        <AnimatePresence>
+          {incomingHearts.map((h) => (
+            <motion.div
+              key={h.id}
+              initial={{ y: 40, opacity: 0, scale: 0.4 }}
+              animate={{
+                y: -260,
+                opacity: [0, 1, 1, 0],
+                scale: [0.4, 1.4, 1.2, 0.9],
+                rotate: [-8, 8, -4, 4],
+              }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 2.2, ease: "easeOut" }}
+              className="absolute text-rose-deep"
+              style={{
+                left: `${h.x * 100}%`,
+                bottom: "35%",
+                transform: "translateX(-50%)",
+                filter: "drop-shadow(2px 2px 0 var(--color-ink))",
+              }}
+            >
+              <PixelIcon name="heart" size={96} />
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
 
       <AnimatePresence>
         {isZoomed && (
@@ -1239,20 +1389,30 @@ function PartnerPresenceBadge({
   userId,
   accent,
   displayName,
+  onSendHeart,
 }: {
   userId: string;
   accent: string;
   displayName: string;
+  onSendHeart: () => void;
 }) {
   return (
-    <motion.div
+    <motion.button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onSendHeart();
+      }}
       initial={{ scale: 0, rotate: -15, opacity: 0 }}
       animate={{ scale: 1, rotate: 0, opacity: 1 }}
       exit={{ scale: 0, opacity: 0 }}
+      whileTap={{ scale: 0.92 }}
+      whileHover={{ scale: 1.05 }}
       transition={{ type: "spring", stiffness: 360, damping: 16 }}
-      className="absolute top-2 left-2 z-10 flex items-center gap-1.5 rounded-full bg-paper border-2 border-ink pl-0.5 pr-2 py-0.5"
+      className="absolute top-2 left-2 z-10 flex items-center gap-1.5 rounded-full bg-paper border-2 border-ink pl-0.5 pr-2 py-0.5 cursor-pointer"
       style={{ boxShadow: "2px 2px 0 0 var(--color-ink)" }}
-      title={`${displayName} is on this page`}
+      title={`tap to send ${displayName} a heart`}
+      aria-label={`send ${displayName} a heart`}
     >
       <motion.div
         animate={{ scale: [1, 1.12, 1] }}
@@ -1264,7 +1424,7 @@ function PartnerPresenceBadge({
         {displayName}
         <span className="text-rose-deep ml-0.5">♡</span>
       </span>
-    </motion.div>
+    </motion.button>
   );
 }
 
