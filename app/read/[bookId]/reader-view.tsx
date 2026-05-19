@@ -8,12 +8,32 @@ import {
   useState,
 } from "react";
 import Link from "next/link";
-import { Document, Page } from "react-pdf";
+import dynamic from "next/dynamic";
 import { AnimatePresence, motion, type PanInfo } from "motion/react";
 import toast from "react-hot-toast";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
-import "@/lib/pdf-client"; // configures pdfjs worker
+
+// react-pdf / pdfjs-dist reference DOMMatrix at module evaluation, which
+// crashes during SSR. Load them client-only and configure the worker
+// once on first load.
+const Document = dynamic(
+  () =>
+    import("react-pdf").then((m) => {
+      if (
+        typeof window !== "undefined" &&
+        !m.pdfjs.GlobalWorkerOptions.workerSrc
+      ) {
+        m.pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+      }
+      return m.Document;
+    }),
+  { ssr: false },
+);
+const Page = dynamic(
+  () => import("react-pdf").then((m) => m.Page),
+  { ssr: false },
+);
 import { PixelIcon } from "@/components/pixel-icon";
 import { Avatar } from "@/components/avatar";
 import { createClient } from "@/lib/supabase/client";
