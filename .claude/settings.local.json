@@ -3,7 +3,15 @@
     "allow": [
       "Bash(npm -v)",
       "Bash(pnpm -v)",
-      "Bash(npx --yes create-next-app@latest . --ts --tailwind --eslint --app --use-npm --no-src-dir --import-alias \"@/*\" --turbopack --yes)"
+      "Bash(npx --yes create-next-app@latest . --ts --tailwind --eslint --app --use-npm --no-src-dir --import-alias \"@/*\" --turbopack --yes)",
+      "Bash(npm install *)",
+      "Bash(npx tsc *)",
+      "Bash(NEXT_PUBLIC_SUPABASE_URL=https://placeholder.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=placeholder NEXT_PUBLIC_ALLOWED_EMAILS=test@test.com npm run build)",
+      "Bash(npx next *)",
+      "Bash(curl -sS \"https://api.iconify.design/pixelarticons.json?icons=heart,star,flare,flower,smile,sad,moon,sun,cloud,fire,coffee,sparkles,mood-happy\")",
+      "Bash(curl -sS \"https://api.iconify.design/pixelarticons.json?icons=edit,image,trash,human,more-horizontal,drop-half,warning-box,alert,arrow-left,arrow-right,chevron-left,chevron-right,book,book-open,bookmarks,bookmark,notes,mail,mail-arrow-right,mail-unread,downasaur,gift,zap,upload,download,plus,close,check\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('FOUND:', sorted\\(d['icons'].keys\\(\\)\\)\\); print\\('NOT FOUND:', d.get\\('not_found', []\\)\\)\")",
+      "Bash(curl -sS \"https://api.iconify.design/pixelarticons.json?icons=star,star-half,mood-sad,sad-cry,frown,music,fire,sparkles,heart-broken,coffee,gift,moon,sun\")"
     ]
   }
 }

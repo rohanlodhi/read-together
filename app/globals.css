@@ -1,26 +1,149 @@
 @import "tailwindcss";
 
+@theme {
+  --color-cream: #fff8f0;
+  --color-cream-deep: #fdecd9;
+  --color-paper: #fffaf3;
+  --color-ink: #3a2e29;
+  --color-ink-soft: #6d5b50;
+  --color-ink-faint: #b6a397;
+
+  --color-peach: #ffb5a7;
+  --color-peach-soft: #ffd6cc;
+  --color-peach-deep: #e08a78;
+
+  --color-lavender: #c8b6ff;
+  --color-lavender-soft: #e3daff;
+  --color-lavender-deep: #8b73e8;
+
+  --color-sage: #a8d4ab;
+  --color-sage-soft: #d7ebd8;
+  --color-sage-deep: #6fae74;
+
+  --color-rose: #ffa8c9;
+  --color-rose-soft: #ffd1e0;
+  --color-rose-deep: #ea6da0;
+
+  --color-sun: #ffd97a;
+  --color-sun-soft: #ffeab3;
+  --color-sun-deep: #e3b144;
+
+  --font-display: var(--font-pixelify), ui-monospace, "Courier New", monospace;
+  --font-sans: var(--font-mplus), ui-rounded, "M PLUS Rounded 1c", system-ui,
+    sans-serif;
+  --font-hand: var(--font-caveat), "Comic Sans MS", cursive;
+
+  --shadow-soft: 3px 3px 0 0 rgba(58, 46, 41, 0.12);
+  --shadow-pop: 5px 5px 0 0 rgba(58, 46, 41, 0.22);
+  --shadow-card: 4px 4px 0 0 rgba(58, 46, 41, 0.18);
+
+  --radius-blob: 18px;
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html,
+body {
+  min-height: 100%;
+  background: var(--color-cream);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-weight: 500;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-image:
+    radial-gradient(circle at 12% 8%, rgba(255, 181, 167, 0.18), transparent 35%),
+    radial-gradient(circle at 88% 14%, rgba(200, 182, 255, 0.16), transparent 38%),
+    radial-gradient(circle at 60% 92%, rgba(255, 217, 122, 0.18), transparent 42%);
+  background-attachment: fixed;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-peach);
+  border-radius: 999px;
+  border: 2px solid var(--color-cream);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-peach-deep);
+}
+
+::selection {
+  background: var(--color-lavender-soft);
+  color: var(--color-ink);
+}
+
+/* Chunky game-button: thick border + hard offset shadow that compresses on press. */
+.btn-bouncy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.55rem 1.15rem;
+  border-radius: 14px;
+  background: var(--color-peach);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  border: 2.5px solid var(--color-ink);
+  box-shadow: 4px 4px 0 0 var(--color-ink);
+  transition:
+    transform 0.08s ease,
+    box-shadow 0.08s ease,
+    background 0.15s ease;
+}
+.btn-bouncy:hover {
+  background: var(--color-peach-soft);
+}
+.btn-bouncy:active {
+  transform: translate(3px, 3px);
+  box-shadow: 1px 1px 0 0 var(--color-ink);
+}
+
+/* Game-dialog card: thick border + hard offset shadow. */
+.card-soft {
+  background: var(--color-paper);
+  border-radius: var(--radius-blob);
+  border: 2.5px solid var(--color-ink);
+  box-shadow: 4px 4px 0 0 var(--color-ink);
+}
+
+.card-soft-quiet {
+  background: var(--color-paper);
+  border-radius: var(--radius-blob);
+  border: 2px solid var(--color-ink-soft);
+  box-shadow: 3px 3px 0 0 var(--color-ink-soft);
+}
+
+/* Tiny pixel-style pill. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  background: var(--color-paper);
+  border: 2px solid var(--color-ink);
+  box-shadow: 2px 2px 0 0 var(--color-ink);
+  font-weight: 700;
+  font-size: 0.8rem;
+}
+
+/* Safety: never let the rendered PDF canvas escape its container. */
+.react-pdf__Page,
+.react-pdf__Page__canvas {
+  max-width: 100% !important;
+  max-height: 100% !important;
+  height: auto !important;
+  display: block;
 }

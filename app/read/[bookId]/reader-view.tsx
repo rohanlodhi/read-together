@@ -1,0 +1,1178 @@
+"use client";
+
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import Link from "next/link";
+import { Document, Page } from "react-pdf";
+import { AnimatePresence, motion, type PanInfo } from "motion/react";
+import toast from "react-hot-toast";
+import "react-pdf/dist/Page/AnnotationLayer.css";
+import "react-pdf/dist/Page/TextLayer.css";
+import "@/lib/pdf-client"; // configures pdfjs worker
+import { PixelIcon } from "@/components/pixel-icon";
+import { Avatar } from "@/components/avatar";
+import { createClient } from "@/lib/supabase/client";
+import {
+  BookmarksDrawer,
+  type BookmarkRow,
+} from "@/components/reader/bookmarks-drawer";
+import { HighlightLayer } from "@/components/reader/highlight-layer";
+import { MarkCanvas } from "@/components/reader/mark-canvas";
+import { AnnotationBubble } from "@/components/reader/annotation-bubble";
+import { ReactionsLayer } from "@/components/reader/reactions-layer";
+import { ReactCanvas } from "@/components/reader/react-canvas";
+import type { AnnotationRow, ReactionRow, Rect } from "@/components/reader/types";
+import type { IconName } from "@/components/pixel-icon";
+
+const SWIPE_OFFSET = 60;
+const SWIPE_VELOCITY = 400;
+const AUTO_HIDE_MS = 3500;
+const DEFAULT_ASPECT = 0.7727;
+
+type Me = {
+  userId: string;
+  displayName: string;
+  accent: string;
+};
+
+type Partner = {
+  userId: string;
+  displayName: string;
+  accent: string;
+};
+
+export function ReaderView({
+  bookId,
+  bookTitle,
+  bookAuthor,
+  pdfUrl,
+  totalPages: initialTotal,
+  initialPage,
+  initialBookmarks,
+  initialAnnotations,
+  initialReactions,
+  initialPartnerPage,
+  me,
+  partner,
+}: {
+  bookId: string;
+  bookTitle: string;
+  bookAuthor: string | null;
+  pdfUrl: string;
+  totalPages: number | null;
+  initialPage: number;
+  initialBookmarks: BookmarkRow[];
+  initialAnnotations: AnnotationRow[];
+  initialReactions: ReactionRow[];
+  initialPartnerPage: number | null;
+  me: Me | null;
+  partner: Partner | null;
+}) {
+  const [page, setPage] = useState<number>(initialPage);
+  const [direction, setDirection] = useState<1 | -1>(1);
+  const [total, setTotal] = useState<number>(initialTotal ?? 0);
+  const [aspect, setAspect] = useState<number>(DEFAULT_ASPECT);
+  const [docError, setDocError] = useState<string | null>(null);
+  const [size, setSize] = useState({ w: 0, h: 0 });
+  const [chromeVisible, setChromeVisible] = useState(true);
+  const [partnerPage, setPartnerPage] = useState<number | null>(
+    initialPartnerPage,
+  );
+  const [bookmarks, setBookmarks] = useState<BookmarkRow[]>(initialBookmarks);
+  const [annotations, setAnnotations] =
+    useState<AnnotationRow[]>(initialAnnotations);
+  const [reactions, setReactions] = useState<ReactionRow[]>(initialReactions);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [markMode, setMarkMode] = useState(false);
+  const [reactMode, setReactMode] = useState(false);
+  const [openAnnotationId, setOpenAnnotationId] = useState<string | null>(
+    null,
+  );
+
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const chromePinned = useRef(false);
+
+  const file = useMemo(() => ({ url: pdfUrl }), [pdfUrl]);
+
+  // ------------------------------------------------------------------- size
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const update = () => setSize({ w: el.clientWidth, h: el.clientHeight });
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    window.addEventListener("resize", update);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, []);
+
+  // ----------------------------------------------------------------- chrome
+  const clearHide = useCallback(() => {
+    if (hideTimer.current) {
+      clearTimeout(hideTimer.current);
+      hideTimer.current = null;
+    }
+  }, []);
+
+  const scheduleHide = useCallback(() => {
+    clearHide();
+    if (chromePinned.current) return;
+    hideTimer.current = setTimeout(
+      () => setChromeVisible(false),
+      AUTO_HIDE_MS,
+    );
+  }, [clearHide]);
+
+  const showChrome = useCallback(() => {
+    setChromeVisible(true);
+    scheduleHide();
+  }, [scheduleHide]);
+
+  const pinChrome = useCallback(() => {
+    chromePinned.current = true;
+    clearHide();
+    setChromeVisible(true);
+  }, [clearHide]);
+
+  const unpinChrome = useCallback(() => {
+    chromePinned.current = false;
+    scheduleHide();
+  }, [scheduleHide]);
+
+  useEffect(() => {
+    scheduleHide();
+    return () => clearHide();
+  }, [scheduleHide, clearHide]);
+
+  // ----------------------------------------------------------------- realtime
+  useEffect(() => {
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`book:${bookId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "reading_progress",
+          filter: `book_id=eq.${bookId}`,
+        },
+        (payload) => {
+          const row = (payload.new ?? payload.old) as
+            | { user_id: string; page: number }
+            | null;
+          if (!row || !partner) return;
+          if (row.user_id !== partner.userId) return;
+          if (payload.eventType === "DELETE") {
+            setPartnerPage(null);
+          } else {
+            const newRow = payload.new as { page: number };
+            setPartnerPage(newRow.page);
+          }
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "bookmarks",
+          filter: `book_id=eq.${bookId}`,
+        },
+        (payload) => {
+          if (payload.eventType === "INSERT") {
+            const row = payload.new as BookmarkRow;
+            setBookmarks((bs) =>
+              bs.some((b) => b.id === row.id) ? bs : [...bs, row],
+            );
+          } else if (payload.eventType === "DELETE") {
+            const row = payload.old as { id?: string };
+            if (!row.id) return;
+            setBookmarks((bs) => bs.filter((b) => b.id !== row.id));
+          } else if (payload.eventType === "UPDATE") {
+            const row = payload.new as BookmarkRow;
+            setBookmarks((bs) =>
+              bs.map((b) => (b.id === row.id ? row : b)),
+            );
+          }
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "annotations",
+          filter: `book_id=eq.${bookId}`,
+        },
+        (payload) => {
+          if (payload.eventType === "INSERT") {
+            const row = payload.new as AnnotationRow;
+            setAnnotations((as) =>
+              as.some((a) => a.id === row.id) ? as : [...as, row],
+            );
+          } else if (payload.eventType === "DELETE") {
+            const row = payload.old as { id?: string };
+            if (!row.id) return;
+            setAnnotations((as) => as.filter((a) => a.id !== row.id));
+          } else if (payload.eventType === "UPDATE") {
+            const row = payload.new as AnnotationRow;
+            setAnnotations((as) =>
+              as.map((a) => (a.id === row.id ? row : a)),
+            );
+          }
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "reactions",
+          filter: `book_id=eq.${bookId}`,
+        },
+        (payload) => {
+          if (payload.eventType === "INSERT") {
+            const row = payload.new as ReactionRow;
+            setReactions((rs) =>
+              rs.some((r) => r.id === row.id) ? rs : [...rs, row],
+            );
+          } else if (payload.eventType === "DELETE") {
+            const row = payload.old as { id?: string };
+            if (!row.id) return;
+            setReactions((rs) => rs.filter((r) => r.id !== row.id));
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [bookId, partner]);
+
+  // ----------------------------------------------------------------- save
+  useEffect(() => {
+    if (page < 1) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+      await supabase.from("reading_progress").upsert(
+        {
+          user_id: user.id,
+          book_id: bookId,
+          page,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id,book_id" },
+      );
+    }, 800);
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
+  }, [page, bookId]);
+
+  // ------------------------------------------------------------- nav
+  const goPrev = useCallback(
+    (revealChrome = true) => {
+      setDirection(-1);
+      setPage((p) => Math.max(1, p - 1));
+      if (revealChrome) showChrome();
+    },
+    [showChrome],
+  );
+
+  const goNext = useCallback(
+    (revealChrome = true) => {
+      setDirection(1);
+      setPage((p) => (total ? Math.min(total, p + 1) : p + 1));
+      if (revealChrome) showChrome();
+    },
+    [total, showChrome],
+  );
+
+  const jumpTo = useCallback(
+    (p: number) => {
+      setDirection(p > page ? 1 : -1);
+      setPage(p);
+      showChrome();
+    },
+    [page, showChrome],
+  );
+
+  // Keyboard.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (
+        e.target instanceof HTMLElement &&
+        (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")
+      )
+        return;
+      if (e.key === "ArrowRight" || e.key === " " || e.key === "PageDown") {
+        e.preventDefault();
+        goNext();
+      } else if (e.key === "ArrowLeft" || e.key === "PageUp") {
+        e.preventDefault();
+        goPrev();
+      } else if (e.key === "Home") {
+        setDirection(-1);
+        setPage(1);
+        showChrome();
+      } else if (e.key === "End" && total) {
+        setDirection(1);
+        setPage(total);
+        showChrome();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [total, goNext, goPrev, showChrome]);
+
+  // ----------------------------------------------------------- page sizing
+  const { pageWidth, pageHeight, ready } = useMemo(() => {
+    if (size.w === 0 || size.h === 0) {
+      return { pageWidth: 0, pageHeight: 0, ready: false };
+    }
+    const isMobile = size.w < 640;
+    const pad = isMobile ? 6 : 28;
+    const maxW = size.w - pad * 2;
+    const maxH = size.h - pad * 2;
+    const w = Math.floor(Math.min(maxW, maxH * aspect));
+    const h = Math.floor(w / aspect);
+    return { pageWidth: w, pageHeight: h, ready: true };
+  }, [size.w, size.h, aspect]);
+
+  // ----------------------------------------------------------------- swipe
+  const onDragEnd = (_: unknown, info: PanInfo) => {
+    const { offset, velocity } = info;
+    if (
+      offset.x < -SWIPE_OFFSET ||
+      (offset.x < -10 && velocity.x < -SWIPE_VELOCITY)
+    ) {
+      goNext(false);
+    } else if (
+      offset.x > SWIPE_OFFSET ||
+      (offset.x > 10 && velocity.x > SWIPE_VELOCITY)
+    ) {
+      goPrev(false);
+    }
+  };
+
+  // ----------------------------------------------------------- bookmarks
+  const myBookmarkOnCurrentPage = useMemo(
+    () =>
+      me ? bookmarks.find((b) => b.user_id === me.userId && b.page === page) : null,
+    [bookmarks, me, page],
+  );
+  const partnerBookmarkOnCurrentPage = useMemo(
+    () =>
+      partner
+        ? bookmarks.find(
+            (b) => b.user_id === partner.userId && b.page === page,
+          )
+        : null,
+    [bookmarks, partner, page],
+  );
+
+  const toggleCurrentBookmark = useCallback(async () => {
+    if (!me) return;
+    const supabase = createClient();
+    if (myBookmarkOnCurrentPage) {
+      const id = myBookmarkOnCurrentPage.id;
+      setBookmarks((bs) => bs.filter((b) => b.id !== id));
+      const { error } = await supabase
+        .from("bookmarks")
+        .delete()
+        .eq("id", id);
+      if (error) {
+        toast.error("couldn't remove bookmark");
+        setBookmarks((bs) =>
+          bs.some((b) => b.id === id) ? bs : [...bs, myBookmarkOnCurrentPage],
+        );
+      }
+    } else {
+      const newRow: BookmarkRow = {
+        id: crypto.randomUUID(),
+        user_id: me.userId,
+        book_id: bookId,
+        page,
+        label: null,
+        color: me.accent,
+        created_at: new Date().toISOString(),
+      };
+      setBookmarks((bs) => [...bs, newRow]);
+      const { error } = await supabase.from("bookmarks").insert({
+        id: newRow.id,
+        user_id: me.userId,
+        book_id: bookId,
+        page,
+        color: me.accent,
+      });
+      if (error) {
+        toast.error("couldn't save bookmark");
+        setBookmarks((bs) => bs.filter((b) => b.id !== newRow.id));
+      }
+    }
+  }, [bookId, me, myBookmarkOnCurrentPage, page]);
+
+  const deleteBookmark = useCallback(
+    async (id: string) => {
+      const prev = bookmarks;
+      setBookmarks((bs) => bs.filter((b) => b.id !== id));
+      const supabase = createClient();
+      const { error } = await supabase
+        .from("bookmarks")
+        .delete()
+        .eq("id", id);
+      if (error) {
+        toast.error("couldn't delete bookmark");
+        setBookmarks(prev);
+      }
+    },
+    [bookmarks],
+  );
+
+  // ----------------------------------------------------------- annotations
+  const pageAnnotations = useMemo(
+    () => annotations.filter((a) => a.page === page),
+    [annotations, page],
+  );
+
+  const openAnnotation = useMemo(
+    () =>
+      openAnnotationId
+        ? annotations.find((a) => a.id === openAnnotationId) ?? null
+        : null,
+    [annotations, openAnnotationId],
+  );
+
+  const annotationOwner = useCallback(
+    (userId: string) => {
+      if (me && userId === me.userId)
+        return { name: me.displayName, accent: me.accent, isMine: true };
+      if (partner && userId === partner.userId)
+        return {
+          name: partner.displayName,
+          accent: partner.accent,
+          isMine: false,
+        };
+      return { name: "someone", accent: "peach", isMine: false };
+    },
+    [me, partner],
+  );
+
+  const commitHighlight = useCallback(
+    async (rect: Rect) => {
+      if (!me) return;
+      const supabase = createClient();
+      const optimistic: AnnotationRow = {
+        id: crypto.randomUUID(),
+        user_id: me.userId,
+        book_id: bookId,
+        page,
+        kind: "highlight",
+        rects: [rect],
+        selected_text: null,
+        note_content: null,
+        color: me.accent,
+        created_at: new Date().toISOString(),
+      };
+      setAnnotations((as) => [...as, optimistic]);
+      setMarkMode(false);
+      setOpenAnnotationId(optimistic.id);
+      const { error } = await supabase.from("annotations").insert({
+        id: optimistic.id,
+        user_id: me.userId,
+        book_id: bookId,
+        page,
+        kind: "highlight",
+        rects: [rect],
+        color: me.accent,
+      });
+      if (error) {
+        toast.error("couldn't save highlight");
+        setAnnotations((as) => as.filter((a) => a.id !== optimistic.id));
+        setOpenAnnotationId(null);
+      }
+    },
+    [bookId, me, page],
+  );
+
+  const saveAnnotationNote = useCallback(
+    async (id: string, note: string) => {
+      const trimmed = note.trim();
+      const prev = annotations.find((a) => a.id === id);
+      if (!prev) return;
+      setAnnotations((as) =>
+        as.map((a) =>
+          a.id === id ? { ...a, note_content: trimmed || null } : a,
+        ),
+      );
+      const supabase = createClient();
+      const { error } = await supabase
+        .from("annotations")
+        .update({ note_content: trimmed || null })
+        .eq("id", id);
+      if (error) {
+        toast.error("couldn't save note");
+        setAnnotations((as) => as.map((a) => (a.id === id ? prev : a)));
+      }
+    },
+    [annotations],
+  );
+
+  const deleteAnnotation = useCallback(
+    async (id: string) => {
+      const prev = annotations;
+      setAnnotations((as) => as.filter((a) => a.id !== id));
+      setOpenAnnotationId((cur) => (cur === id ? null : cur));
+      const supabase = createClient();
+      const { error } = await supabase
+        .from("annotations")
+        .delete()
+        .eq("id", id);
+      if (error) {
+        toast.error("couldn't delete");
+        setAnnotations(prev);
+      }
+    },
+    [annotations],
+  );
+
+  // ----------------------------------------------------------- reactions
+  const pageReactions = useMemo(
+    () => reactions.filter((r) => r.page === page),
+    [reactions, page],
+  );
+
+  const dropReaction = useCallback(
+    async (emoji: IconName, x: number, y: number) => {
+      if (!me) return;
+      const supabase = createClient();
+      const optimistic: ReactionRow = {
+        id: crypto.randomUUID(),
+        user_id: me.userId,
+        book_id: bookId,
+        page,
+        emoji,
+        x,
+        y,
+        created_at: new Date().toISOString(),
+      };
+      setReactions((rs) => [...rs, optimistic]);
+      setReactMode(false);
+      const { error } = await supabase.from("reactions").insert({
+        id: optimistic.id,
+        user_id: me.userId,
+        book_id: bookId,
+        page,
+        emoji,
+        x,
+        y,
+      });
+      if (error) {
+        toast.error("couldn't drop sticker");
+        setReactions((rs) => rs.filter((r) => r.id !== optimistic.id));
+      }
+    },
+    [bookId, me, page],
+  );
+
+  const deleteReaction = useCallback(
+    async (id: string) => {
+      const prev = reactions;
+      setReactions((rs) => rs.filter((r) => r.id !== id));
+      const supabase = createClient();
+      const { error } = await supabase
+        .from("reactions")
+        .delete()
+        .eq("id", id);
+      if (error) {
+        toast.error("couldn't remove");
+        setReactions(prev);
+      }
+    },
+    [reactions],
+  );
+
+  const reactionAccentFor = useCallback(
+    (userId: string) => annotationOwner(userId).accent,
+    [annotationOwner],
+  );
+
+  const dragDisabled = markMode || reactMode;
+
+  const samePage = partnerPage === page;
+  const canPrev = page > 1;
+  const canNext = total === 0 || page < total;
+  const isBookmarked = Boolean(myBookmarkOnCurrentPage);
+
+  return (
+    <div
+      ref={containerRef}
+      className="fixed inset-0 bg-cream overflow-hidden select-none"
+      style={{ height: "100dvh" }}
+    >
+      {/* ------- TOP CHROME ------- */}
+      <AnimatePresence>
+        {chromeVisible && (
+          <motion.header
+            key="top-chrome"
+            initial={{ y: -56, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -56, opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            className="absolute top-0 left-0 right-0 z-30 px-3 sm:px-5 py-2.5 flex items-center gap-3 bg-cream/95 backdrop-blur border-b-2 border-ink-soft"
+            style={{
+              paddingTop: "calc(0.625rem + env(safe-area-inset-top, 0))",
+            }}
+          >
+            <Link
+              href="/"
+              className="flex items-center gap-1.5 text-ink-soft hover:text-ink transition-colors shrink-0"
+              onMouseEnter={pinChrome}
+              onMouseLeave={unpinChrome}
+            >
+              <PixelIcon name="arrow-left" size={18} />
+              <PixelIcon name="book" size={18} />
+              <span className="text-xs font-bold hidden sm:inline">
+                library
+              </span>
+            </Link>
+
+            <div className="flex-1 min-w-0 text-center">
+              <h1
+                className="font-display text-base sm:text-lg text-ink leading-tight truncate"
+                style={{ fontWeight: 700 }}
+              >
+                {bookTitle}
+              </h1>
+              {bookAuthor && (
+                <p className="text-[10px] sm:text-xs text-ink-faint truncate font-medium leading-none mt-0.5">
+                  {bookAuthor}
+                </p>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                onClick={() => {
+                  setMarkMode((v) => !v);
+                  setReactMode(false);
+                  setOpenAnnotationId(null);
+                  pinChrome();
+                }}
+                aria-label="highlight mode"
+                className={`rounded-lg border-2 border-ink px-2 py-1.5 transition ${
+                  markMode
+                    ? "bg-sun text-ink"
+                    : "bg-paper text-ink hover:bg-peach-soft/40"
+                }`}
+                style={{ boxShadow: "2px 2px 0 0 var(--color-ink)" }}
+              >
+                <PixelIcon name="edit" size={14} />
+              </button>
+              <button
+                onClick={() => {
+                  setReactMode((v) => !v);
+                  setMarkMode(false);
+                  setOpenAnnotationId(null);
+                  pinChrome();
+                }}
+                aria-label="react"
+                className={`rounded-lg border-2 border-ink px-2 py-1.5 transition ${
+                  reactMode
+                    ? "bg-rose-soft text-rose-deep"
+                    : "bg-paper text-ink hover:bg-peach-soft/40"
+                }`}
+                style={{ boxShadow: "2px 2px 0 0 var(--color-ink)" }}
+              >
+                <PixelIcon name="heart" size={14} />
+              </button>
+              <div className="flex items-center -space-x-2">
+                {partner && (
+                  <div
+                    title={`reading with ${partner.displayName}`}
+                    className="relative rounded-full border-2 border-paper"
+                  >
+                    <Avatar
+                      seed={partner.userId}
+                      accent={partner.accent}
+                      size={22}
+                    />
+                  </div>
+                )}
+                {me && (
+                  <div
+                    title={me.displayName}
+                    className="relative rounded-full border-2 border-paper"
+                  >
+                    <Avatar seed={me.userId} accent={me.accent} size={22} />
+                  </div>
+                )}
+              </div>
+            </div>
+          </motion.header>
+        )}
+      </AnimatePresence>
+
+      {/* ------- PDF PAGE + SWIPE ------- */}
+      <div className="absolute inset-0 flex items-center justify-center">
+        {ready && (
+          <Document
+            file={file}
+            onLoadSuccess={({ numPages }) => {
+              setTotal(numPages);
+              setDocError(null);
+            }}
+            onLoadError={(e) => setDocError(e.message)}
+            loading={<DocLoading />}
+            error={
+              <DocError message={docError ?? "Could not open the PDF."} />
+            }
+          >
+            <motion.div
+              drag={dragDisabled ? false : "x"}
+              dragConstraints={{ left: 0, right: 0 }}
+              dragElastic={0.18}
+              dragSnapToOrigin
+              onTap={() => {
+                if (dragDisabled) return;
+                if (openAnnotationId) {
+                  setOpenAnnotationId(null);
+                  unpinChrome();
+                  return;
+                }
+                setChromeVisible((v) => !v);
+              }}
+              onDragEnd={onDragEnd}
+              className="relative"
+              style={{
+                width: pageWidth,
+                height: pageHeight,
+                maxWidth: "100%",
+                maxHeight: "100%",
+                touchAction: dragDisabled ? "none" : "pan-y",
+              }}
+            >
+              <AnimatePresence custom={direction} initial={false}>
+                <motion.div
+                  key={page}
+                  custom={direction}
+                  variants={pageVariants}
+                  initial="enter"
+                  animate="center"
+                  exit="exit"
+                  transition={{
+                    x: { type: "spring", stiffness: 320, damping: 32 },
+                    opacity: { duration: 0.18 },
+                  }}
+                  className="absolute inset-0"
+                >
+                  <div
+                    className="w-full h-full bg-white border-2 border-ink rounded-md overflow-hidden relative"
+                    style={{ boxShadow: "5px 5px 0 0 var(--color-ink)" }}
+                  >
+                    <Page
+                      pageNumber={page}
+                      width={pageWidth}
+                      renderAnnotationLayer={false}
+                      renderTextLayer={false}
+                      onLoadSuccess={(pdfPage) => {
+                        const vp = pdfPage.getViewport({ scale: 1 });
+                        const a = vp.width / vp.height;
+                        if (
+                          Number.isFinite(a) &&
+                          Math.abs(a - aspect) > 0.01
+                        ) {
+                          setAspect(a);
+                        }
+                      }}
+                      loading={
+                        <PageSkeleton width={pageWidth} aspect={aspect} />
+                      }
+                    />
+
+                    <HighlightLayer
+                      annotations={pageAnnotations}
+                      onTap={(id) => {
+                        setOpenAnnotationId(id);
+                        pinChrome();
+                      }}
+                      selectedId={openAnnotationId}
+                    />
+
+                    <ReactionsLayer
+                      reactions={pageReactions}
+                      myUserId={me?.userId ?? null}
+                      ownerAccent={reactionAccentFor}
+                      onDeleteMine={deleteReaction}
+                    />
+
+                    {markMode && me && (
+                      <MarkCanvas
+                        accent={me.accent}
+                        onCommit={commitHighlight}
+                        onCancel={() => setMarkMode(false)}
+                      />
+                    )}
+
+                    {reactMode && me && (
+                      <ReactCanvas
+                        onDrop={dropReaction}
+                        onCancel={() => setReactMode(false)}
+                      />
+                    )}
+
+                    {openAnnotation && (
+                      <AnnotationBubble
+                        key={openAnnotation.id}
+                        annotation={openAnnotation}
+                        ownerName={annotationOwner(openAnnotation.user_id).name}
+                        ownerAccent={
+                          annotationOwner(openAnnotation.user_id).accent
+                        }
+                        isMine={
+                          annotationOwner(openAnnotation.user_id).isMine
+                        }
+                        onClose={() => {
+                          setOpenAnnotationId(null);
+                          unpinChrome();
+                        }}
+                        onSave={(note) =>
+                          saveAnnotationNote(openAnnotation.id, note)
+                        }
+                        onDelete={() => deleteAnnotation(openAnnotation.id)}
+                      />
+                    )}
+                  </div>
+
+                  {/* Partner bookmark marker — small flag at top-right of page */}
+                  {partnerBookmarkOnCurrentPage && partner && (
+                    <PartnerBookmarkFlag accent={partner.accent} />
+                  )}
+                </motion.div>
+              </AnimatePresence>
+            </motion.div>
+          </Document>
+        )}
+      </div>
+
+      {/* ------- BOTTOM CHROME ------- */}
+      <AnimatePresence>
+        {chromeVisible && (
+          <motion.div
+            key="bot-chrome"
+            initial={{ y: 64, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 64, opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            className="absolute bottom-0 left-0 right-0 z-30 px-3 sm:px-6 py-2.5 flex items-center justify-between gap-2 sm:gap-3 bg-cream/95 backdrop-blur border-t-2 border-ink-soft"
+            style={{
+              paddingBottom:
+                "calc(0.625rem + env(safe-area-inset-bottom, 0))",
+            }}
+          >
+            <button
+              onClick={() => goPrev()}
+              disabled={!canPrev}
+              aria-label="previous page"
+              className="rounded-lg bg-paper border-2 border-ink px-2.5 py-1.5 text-ink hover:bg-peach-soft/40 disabled:opacity-40 disabled:cursor-not-allowed transition shrink-0"
+              style={{ boxShadow: "3px 3px 0 0 var(--color-ink)" }}
+            >
+              <PixelIcon name="chevron-left" size={16} />
+            </button>
+
+            <button
+              onClick={toggleCurrentBookmark}
+              aria-label={isBookmarked ? "remove bookmark" : "bookmark page"}
+              className={`rounded-lg border-2 border-ink px-2.5 py-1.5 transition shrink-0 ${
+                isBookmarked
+                  ? "bg-rose-soft text-rose-deep"
+                  : "bg-paper text-ink hover:bg-peach-soft/40"
+              }`}
+              style={{ boxShadow: "3px 3px 0 0 var(--color-ink)" }}
+            >
+              <motion.span
+                key={isBookmarked ? "yes" : "no"}
+                initial={{ scale: 0.6 }}
+                animate={{ scale: 1 }}
+                transition={{ type: "spring", stiffness: 320, damping: 16 }}
+                className="block"
+              >
+                <PixelIcon name="bookmark" size={16} />
+              </motion.span>
+            </button>
+
+            <div className="flex items-center gap-2 flex-1 justify-center min-w-0">
+              <PageJumper
+                page={page}
+                total={total}
+                onJump={jumpTo}
+                onPin={pinChrome}
+                onUnpin={unpinChrome}
+              />
+              {partner && partnerPage && !samePage && (
+                <button
+                  onClick={() => jumpTo(partnerPage)}
+                  className="pill hover:bg-peach-soft/30 shrink-0"
+                >
+                  <Avatar
+                    seed={partner.userId}
+                    accent={partner.accent}
+                    size={16}
+                  />
+                  p.{partnerPage}
+                  <span className="hidden sm:inline">— jump?</span>
+                </button>
+              )}
+              {partner && samePage && (
+                <motion.div
+                  initial={{ scale: 0.6, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ type: "spring", stiffness: 280, damping: 16 }}
+                  className="pill shrink-0"
+                  style={{ background: "var(--color-rose-soft)" }}
+                >
+                  <Avatar
+                    seed={partner.userId}
+                    accent={partner.accent}
+                    size={16}
+                  />
+                  <PixelIcon
+                    name="heart"
+                    size={12}
+                    className="text-rose-deep"
+                  />
+                  same page
+                </motion.div>
+              )}
+            </div>
+
+            <button
+              onClick={() => {
+                setDrawerOpen(true);
+                pinChrome();
+              }}
+              aria-label="open bookmarks"
+              className="rounded-lg bg-paper border-2 border-ink px-2.5 py-1.5 text-ink hover:bg-peach-soft/40 transition shrink-0 relative"
+              style={{ boxShadow: "3px 3px 0 0 var(--color-ink)" }}
+            >
+              <PixelIcon name="bookmarks" size={16} />
+              {bookmarks.length > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 text-[10px] font-bold tabular-nums bg-rose-deep text-paper rounded-full min-w-[18px] h-[18px] px-1 border-2 border-ink flex items-center justify-center">
+                  {bookmarks.length}
+                </span>
+              )}
+            </button>
+
+            <button
+              onClick={() => goNext()}
+              disabled={!canNext}
+              aria-label="next page"
+              className="rounded-lg bg-paper border-2 border-ink px-2.5 py-1.5 text-ink hover:bg-peach-soft/40 disabled:opacity-40 disabled:cursor-not-allowed transition shrink-0"
+              style={{ boxShadow: "3px 3px 0 0 var(--color-ink)" }}
+            >
+              <PixelIcon name="chevron-right" size={16} />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <FirstHint />
+
+      <BookmarksDrawer
+        open={drawerOpen}
+        onClose={() => {
+          setDrawerOpen(false);
+          unpinChrome();
+        }}
+        bookmarks={bookmarks}
+        me={me}
+        partner={partner}
+        currentPage={page}
+        isCurrentBookmarkedByMe={isBookmarked}
+        onToggleCurrentPage={toggleCurrentBookmark}
+        onJump={jumpTo}
+        onDelete={deleteBookmark}
+      />
+    </div>
+  );
+}
+
+const pageVariants = {
+  enter: (dir: number) => ({ x: dir > 0 ? 40 : -40, opacity: 0 }),
+  center: { x: 0, opacity: 1 },
+  exit: (dir: number) => ({ x: dir > 0 ? -40 : 40, opacity: 0 }),
+};
+
+function PartnerBookmarkFlag({ accent }: { accent: string }) {
+  const fillMap: Record<string, string> = {
+    peach: "var(--color-peach)",
+    lavender: "var(--color-lavender)",
+    sage: "var(--color-sage)",
+    rose: "var(--color-rose)",
+    sun: "var(--color-sun)",
+  };
+  return (
+    <div
+      className="absolute top-2 right-2 rounded-md border-2 border-ink px-1.5 py-1 shadow-soft"
+      style={{
+        background: fillMap[accent] ?? fillMap.peach,
+        boxShadow: "2px 2px 0 0 var(--color-ink)",
+      }}
+      title="partner bookmarked this page"
+    >
+      <PixelIcon name="bookmark" size={14} className="text-ink" />
+    </div>
+  );
+}
+
+function PageJumper({
+  page,
+  total,
+  onJump,
+  onPin,
+  onUnpin,
+}: {
+  page: number;
+  total: number;
+  onJump: (p: number) => void;
+  onPin: () => void;
+  onUnpin: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(String(page));
+  const [lastPage, setLastPage] = useState(page);
+
+  if (lastPage !== page) {
+    setLastPage(page);
+    setValue(String(page));
+  }
+
+  const commit = () => {
+    const n = parseInt(value, 10);
+    if (Number.isFinite(n) && n >= 1 && (!total || n <= total)) {
+      onJump(n);
+    }
+    setEditing(false);
+    onUnpin();
+  };
+
+  return (
+    <div className="text-sm font-bold text-ink-soft tabular-nums flex items-center gap-1 shrink-0">
+      {editing ? (
+        <input
+          autoFocus
+          value={value}
+          inputMode="numeric"
+          onFocus={onPin}
+          onChange={(e) => setValue(e.target.value.replace(/[^0-9]/g, ""))}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commit();
+            else if (e.key === "Escape") {
+              setEditing(false);
+              onUnpin();
+            }
+          }}
+          className="w-14 text-center rounded-lg bg-paper border-2 border-ink px-2 py-1 focus:outline-none"
+        />
+      ) : (
+        <button
+          onClick={() => {
+            setEditing(true);
+            onPin();
+          }}
+          className="rounded-lg px-2.5 py-1 hover:bg-peach-soft/40 transition"
+        >
+          page {page}
+        </button>
+      )}
+      {total > 0 && <span className="text-ink-faint">of {total}</span>}
+    </div>
+  );
+}
+
+function DocLoading() {
+  return (
+    <div className="card-soft p-10 text-center text-ink">
+      <PixelIcon name="sparkles" size={32} />
+      <p className="font-bold text-ink mt-3">opening the book…</p>
+    </div>
+  );
+}
+
+function PageSkeleton({
+  width,
+  aspect,
+}: {
+  width: number;
+  aspect: number;
+}) {
+  return (
+    <div
+      style={{ width, height: Math.round(width / aspect) }}
+      className="bg-cream-deep/50 animate-pulse"
+    />
+  );
+}
+
+function DocError({ message }: { message: string }) {
+  return (
+    <div className="card-soft p-8 text-center max-w-md mx-4 text-ink">
+      <PixelIcon name="alert" size={48} className="text-rose-deep" />
+      <p className="font-bold text-ink mt-3">couldn&apos;t open this book</p>
+      <p className="text-sm text-ink-soft mt-1 font-medium">{message}</p>
+    </div>
+  );
+}
+
+function FirstHint() {
+  const [shown, setShown] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return !localStorage.getItem("rt:swipe-hint-shown");
+  });
+
+  useEffect(() => {
+    if (!shown) return;
+    const t = setTimeout(() => {
+      setShown(false);
+      localStorage.setItem("rt:swipe-hint-shown", "1");
+    }, 2800);
+    return () => clearTimeout(t);
+  }, [shown]);
+
+  return (
+    <AnimatePresence>
+      {shown && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 10 }}
+          transition={{ duration: 0.25 }}
+          className="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-24 z-40 pill"
+          style={{ background: "var(--color-paper)" }}
+        >
+          <PixelIcon name="chevron-left" size={12} />
+          swipe to flip
+          <PixelIcon name="chevron-right" size={12} />
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
